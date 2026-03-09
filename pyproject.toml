@@ -8,6 +8,10 @@ dependencies = [
     "numpy",
     "scipy",
     "python-dotenv",
+    "matplotlib>=3.10.8",
+    "seaborn>=0.13.2",
+    "ipykernel>=7.2.0",
+    "pip>=26.0.1",
 ]
 
 [build-system]

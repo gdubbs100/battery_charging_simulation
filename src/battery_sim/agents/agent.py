@@ -22,7 +22,7 @@ class BatteryAgent:
         if self.price_model is not None:
             self.price_model.update(observation.price)
             if isinstance(self.price_model, StochasticModel):
-                forecast = self.price_model.sample(self.forecast_horizon, self.n_samples)
+                forecast = self.price_model.simulate(self.forecast_horizon, self.n_samples)
             elif isinstance(self.price_model, DeterministicModel):
                 forecast = self.price_model.predict(self.forecast_horizon)
             else:

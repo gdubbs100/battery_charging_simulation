@@ -67,7 +67,7 @@ class SimulationEnv:
             self._timestamps = []
             now = datetime.now()
             # Generate first price by sampling 1 step ahead
-            first_price = self._price_model.sample(1, 1)[0, 0]  # type: ignore
+            first_price = self._price_model.simulate(1, 1)[0, 0]  # type: ignore
             self._prices.append(float(first_price))
             self._timestamps.append(now)
 
@@ -108,7 +108,7 @@ class SimulationEnv:
             # Generate next price for stochastic mode
             if self._price_model is not None:
                 self._price_model.update(price)  # type: ignore
-                next_price = self._price_model.sample(1, 1)[0, 0]  # type: ignore
+                next_price = self._price_model.simulate(1, 1)[0, 0]  # type: ignore
                 self._prices.append(float(next_price))
                 self._timestamps.append(
                     self._timestamps[-1] + timedelta(minutes=self.interval_minutes)
