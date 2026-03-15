@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+import pandas as pd
+
 from battery_sim.utils.types import Observation
 
 
@@ -23,4 +25,15 @@ class Policy(ABC):
         done: bool,
     ) -> None:
         """Gym-style transition update. No-op for rule-based policies."""
+        pass
+
+    def learn(
+        self,
+        train_data: pd.DataFrame,
+        battery,
+        num_iters: int = 10,
+        window_len: int = 24,
+        param_grid: dict | None = None,
+    ) -> None:
+        """Fit policy parameters from training data. Override per policy type."""
         pass

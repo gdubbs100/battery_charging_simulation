@@ -13,7 +13,7 @@ class SimulationEnv:
     def __init__(
         self,
         battery: Battery,
-        interval_minutes: int = 5,
+        interval_minutes: int = 60,
         # Mode 1: historical replay
         price_data: pd.DataFrame | None = None,
         # Mode 2: stochastic dynamics
@@ -57,7 +57,8 @@ class SimulationEnv:
             df = self._price_data.copy()
             self._timestamps = pd.to_datetime(df.iloc[:, 0]).tolist()
             self._prices = df.iloc[:, 1].astype(float).tolist()
-            self._max_steps = len(self._prices)
+            # N prices => N-1 actions (first price is observation-only)
+            self._max_steps = len(self._prices) - 1
         else:
             # Stochastic mode: seed the model and generate first price
             self._max_steps = self._n_steps  # type: ignore
@@ -66,7 +67,6 @@ class SimulationEnv:
             self._prices = []
             self._timestamps = []
             now = datetime.now()
-            # Generate first price by sampling 1 step ahead
             first_price = self._price_model.simulate(1, 1)[0, 0]  # type: ignore
             self._prices.append(float(first_price))
             self._timestamps.append(now)
@@ -80,20 +80,32 @@ class SimulationEnv:
         )
 
     def step(self, action: float) -> tuple[Observation, float, bool]:
+        """Execute action. The action decided at price[t] trades at price[t+1]."""
         if self._step_idx >= self._max_steps:
             raise RuntimeError("Episode is done. Call reset().")
 
-        price = self._prices[self._step_idx]
+        # Agent observed price[step_idx], action executes at price[step_idx + 1]
+        exec_idx = self._step_idx + 1
+
+        # For stochastic mode, generate the next price if needed
+        if self._price_model is not None and exec_idx >= len(self._prices):
+            self._price_model.update(self._prices[self._step_idx])  # type: ignore
+            next_price = self._price_model.simulate(1, 1)[0, 0]  # type: ignore
+            self._prices.append(float(next_price))
+            self._timestamps.append(
+                self._timestamps[-1] + timedelta(minutes=self.interval_minutes)
+            )
+
+        exec_price = self._prices[exec_idx]
         energy = self.battery.apply_action(action, self.duration_hours)
 
-        # Reward: revenue from discharge (negative energy = discharged)
-        # energy > 0 means charged (cost), energy < 0 means discharged (revenue)
-        reward = -energy * price  # discharge: -(-E)*P = E*P > 0; charge: -(+E)*P < 0
+        # Reward uses the execution price (t+1)
+        reward = -energy * exec_price
 
         state = self.battery.get_state()
         self._trajectory.append(StepRecord(
-            timestamp=self._timestamps[self._step_idx],
-            price=price,
+            timestamp=self._timestamps[exec_idx],
+            price=exec_price,
             action=action,
             reward=reward,
             soc=state.soc,
@@ -104,29 +116,12 @@ class SimulationEnv:
 
         done = self._step_idx >= self._max_steps
 
-        if not done:
-            # Generate next price for stochastic mode
-            if self._price_model is not None:
-                self._price_model.update(price)  # type: ignore
-                next_price = self._price_model.simulate(1, 1)[0, 0]  # type: ignore
-                self._prices.append(float(next_price))
-                self._timestamps.append(
-                    self._timestamps[-1] + timedelta(minutes=self.interval_minutes)
-                )
-
-            obs = Observation(
-                timestamp=self._timestamps[self._step_idx],
-                price=self._prices[self._step_idx],
-                soc=state.soc,
-                energy_mwh=state.energy_mwh,
-            )
-        else:
-            obs = Observation(
-                timestamp=self._timestamps[-1],
-                price=price,
-                soc=state.soc,
-                energy_mwh=state.energy_mwh,
-            )
+        obs = Observation(
+            timestamp=self._timestamps[self._step_idx],
+            price=self._prices[self._step_idx],
+            soc=state.soc,
+            energy_mwh=state.energy_mwh,
+        )
 
         return obs, reward, done
 

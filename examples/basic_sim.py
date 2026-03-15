@@ -24,8 +24,8 @@ def run_with_synthetic_data():
     )
 
     policy = ThresholdPolicy(
-        charge_below=30.0,
-        discharge_above=70.0,
+        buy_threshold=30.0,
+        sell_threshold=70.0,
         charge_rate=1.0,
         discharge_rate=1.0,
     )
@@ -78,8 +78,8 @@ def run_with_api_data():
     )
 
     policy = ThresholdPolicy(
-        charge_below=50.0,
-        discharge_above=150.0,
+        buy_threshold=50.0,
+        sell_threshold=150.0,
         charge_rate=1.0,
         discharge_rate=1.0,
     )

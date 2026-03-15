@@ -39,6 +39,58 @@ class SimResult:
     cumulative_revenue: float = 0.0
     total_steps: int = 0
 
+    def to_dataframe(self) -> pd.DataFrame:
+        rows = [
+            {
+                "timestamp": r.timestamp,
+                "price": r.price,
+                "action": r.action,
+                "reward": r.reward,
+                "soc": r.soc,
+                "energy_mwh": r.energy_mwh,
+            }
+            for r in self.trajectory
+        ]
+        df = pd.DataFrame(rows)
+        df["cumulative_revenue"] = df["reward"].cumsum()
+        return df
+
+
+@dataclass
+class EvalResult:
+    """Rich evaluation output for a single policy run."""
+
+    name: str
+    sim_result: SimResult
+    df: pd.DataFrame  # time series (from SimResult.to_dataframe)
+    cumulative_revenue: float
+    daily_revenue: pd.Series  # revenue per day
+    mean_daily_revenue: float
+    std_daily_revenue: float
+
+    @staticmethod
+    def from_sim(name: str, sim_result: SimResult) -> "EvalResult":
+        df = sim_result.to_dataframe()
+        daily = df.set_index("timestamp")["reward"].resample("D").sum()
+        return EvalResult(
+            name=name,
+            sim_result=sim_result,
+            df=df,
+            cumulative_revenue=sim_result.cumulative_revenue,
+            daily_revenue=daily,
+            mean_daily_revenue=float(daily.mean()),
+            std_daily_revenue=float(daily.std()),
+        )
+
+    def summary(self) -> str:
+        return (
+            f"{self.name}:\n"
+            f"  Cumulative revenue: ${self.cumulative_revenue:,.2f}\n"
+            f"  Mean daily revenue: ${self.mean_daily_revenue:,.2f} "
+            f"(+/- ${self.std_daily_revenue:,.2f})\n"
+            f"  Total steps: {len(self.df)}"
+        )
+
 
 @dataclass
 class PredictionResult:

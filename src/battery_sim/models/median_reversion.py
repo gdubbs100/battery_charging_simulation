@@ -23,7 +23,7 @@ class MedianReversionModel(StochasticModel):
         step(price, horizon)   — online update + forecast
     """
 
-    def __init__(self, window_days: int = 30, interval_minutes: int = 5):
+    def __init__(self, window_days: int = 30, interval_minutes: int = 60):
         window_size = window_days * 24 * 60 // interval_minutes
         super().__init__(buffer_size=window_size)
         self.window_size = window_size
@@ -78,7 +78,7 @@ class MedianReversionModel(StochasticModel):
 
     def _predict_scale(self, price: float, median: float, horizon: int) -> float:
         reversion = 1 - self.kappa ** horizon
-        return abs(reversion * (median - price)) * self.scale
+        return max(abs(reversion * (median - price)) * self.scale, 1e-8)
 
     def _distribution_at(self, price: float, median: float, horizon: int) -> list[rv_continuous]:
         """Cauchy distributions for h=1..horizon given price and median."""
