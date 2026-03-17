@@ -44,20 +44,33 @@ class MPPIPolicy(Policy):
         self.noise_sigma = noise_sigma
         self._warm_start = np.zeros(horizon)
 
-    def _rollout(self, obs: Observation, actions: np.ndarray, prices: np.ndarray) -> float:
-        """Total profit for one action sequence against one price trajectory."""
+    def _rollout_batch(self, obs: Observation, action_seqs: np.ndarray,
+                       price_trajs: np.ndarray) -> np.ndarray:
+        """Vectorized rollout over all action seqs x price trajectories.
+
+        Args:
+            action_seqs: (K, H) action sequences
+            price_trajs: (N, H) price trajectories
+        Returns:
+            scores: (K,) median profit per action sequence
+        """
         b = self.battery
-        energy = obs.energy_mwh
-        total = 0.0
-        for t in range(len(actions)):
-            a = actions[t]
-            delta = a * b.efficiency if a >= 0 else a
-            delta = np.clip(delta,
-                            b.min_soc * b.capacity_mwh - energy,
-                            b.max_soc * b.capacity_mwh - energy)
-            total += prices[t] * (-delta)
+        K, H = action_seqs.shape
+        N = price_trajs.shape[0]
+        min_e = b.min_soc * b.capacity_mwh
+        max_e = b.max_soc * b.capacity_mwh
+
+        energy = np.full((K, N), obs.energy_mwh)
+        total = np.zeros((K, N))
+
+        for t in range(H):
+            a = action_seqs[:, t][:, np.newaxis]                # (K, 1)
+            delta = np.where(a >= 0, a * b.efficiency, a)       # (K, 1)
+            delta = np.clip(delta, min_e - energy, max_e - energy)  # (K, N)
+            total += price_trajs[np.newaxis, :, t] * (-delta)   # (K, N)
             energy += delta
-        return total
+
+        return np.median(total, axis=1)  # (K,)
 
     def select_action(self, observation: Observation) -> float:
         b = self.battery
@@ -68,13 +81,7 @@ class MPPIPolicy(Policy):
         action_seqs = self._warm_start + noise
         action_seqs = np.clip(action_seqs, -b.max_discharge_rate_mw, b.max_charge_rate_mw)
 
-        scores = np.zeros(self.n_samples)
-        for k in range(self.n_samples):
-            profits = np.array([
-                self._rollout(observation, action_seqs[k], price_trajs[j])
-                for j in range(self.n_trajectories)
-            ])
-            scores[k] = np.median(profits)
+        scores = self._rollout_batch(observation, action_seqs, price_trajs)
 
         weights = softmax(scores / self.temperature)
         optimal = weights @ action_seqs

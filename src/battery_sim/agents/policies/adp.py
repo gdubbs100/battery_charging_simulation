@@ -16,8 +16,8 @@ from battery_sim.simulation.env import SimulationEnv
 
 
 def default_features(obs: Observation) -> torch.Tensor:
-    """Default feature extractor: [price, soc]."""
-    return torch.tensor([obs.price, obs.soc], dtype=torch.float32)
+    """Default feature extractor: [price/100, soc]."""
+    return torch.tensor([obs.price / 100.0, obs.soc], dtype=torch.float32)
 
 
 class ADPPolicy(Policy):
@@ -33,6 +33,8 @@ class ADPPolicy(Policy):
         max_soc: float = 0.9,
         capacity_mwh: float = 1.0,
         lr: float = 1e-3,
+        gamma: float = 0.99,
+        max_grad_norm: float = 10.0,
     ):
         self.net = net
         self.feature_fn = feature_fn
@@ -41,6 +43,8 @@ class ADPPolicy(Policy):
         self.min_soc = min_soc
         self.max_soc = max_soc
         self.capacity_mwh = capacity_mwh
+        self.gamma = gamma
+        self.max_grad_norm = max_grad_norm
         self.optim = torch.optim.Adam(self.net.parameters(), lr=lr)
         self.loss_history: list[float] = []
 
@@ -69,7 +73,7 @@ class ADPPolicy(Policy):
         best, best_val = 0.0, -np.inf
         for x in self.actions:
             r, next_obs = self._approx_next(observation, x)
-            v = r + self._predict(next_obs)
+            v = r + self.gamma * self._predict(next_obs)
             if v > best_val:
                 best_val, best = v, x
         return float(best)
@@ -99,7 +103,7 @@ class ADPPolicy(Policy):
                         timestamp=nxt.timestamp, price=nxt.price,
                         soc=nxt.soc, energy_mwh=nxt.energy_mwh,
                     )
-                    target = curr.reward + self._predict(next_obs)
+                    target = curr.reward + self.gamma * self._predict(next_obs)
                     curr_obs = Observation(
                         timestamp=curr.timestamp, price=curr.price,
                         soc=curr.soc, energy_mwh=curr.energy_mwh,
@@ -113,6 +117,7 @@ class ADPPolicy(Policy):
             self.optim.zero_grad()
             loss = loss_fn(self.net(X).squeeze(-1), y)
             loss.backward()
+            nn.utils.clip_grad_norm_(self.net.parameters(), self.max_grad_norm)
             self.optim.step()
 
             loss_val = loss.item()
