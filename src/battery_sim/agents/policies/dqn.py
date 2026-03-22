@@ -14,6 +14,15 @@ from battery_sim.simulation.env import SimulationEnv
 from battery_sim.agents.policies._utils import default_features, make_mlp
 
 
+def _log_transform_reward(reward: float) -> float:
+    """Transform reward using signed log: sign(r) * log(1 + |r|).
+
+    Handles both positive and negative rewards while compressing large ranges.
+    """
+    sign = np.sign(reward) if reward != 0 else 1.0
+    return float(sign * np.log(1.0 + np.abs(reward)))
+
+
 class DQNPolicy(Policy):
     def __init__(
         self,
@@ -108,13 +117,16 @@ class DQNPolicy(Policy):
 
         feats_t = torch.stack(feats)
         next_feats_t = torch.stack(next_feats)
-        rewards_t = torch.tensor(rewards, dtype=torch.float32)
         dones_t = torch.tensor(dones, dtype=torch.float32)
         idxs_t = torch.tensor(idxs, dtype=torch.long)
 
-        # Normalize rewards for stable training
-        # (battery rewards can be ±5000 per episode, causing huge gradients)
-        rewards_norm = rewards_t / 100.0  # Scale to reasonable magnitude
+        # Log-transform rewards for numerical stability
+        # (battery rewards range [-5000, +1200], causing huge Q-values and gradients)
+        # Transform: sign(r) * log(1 + |r|) compresses range to ~[-8.5, +7]
+        rewards_transformed = torch.tensor(
+            [_log_transform_reward(r) for r in rewards],
+            dtype=torch.float32
+        )  # Scale to reasonable magnitude
 
         q_vals = self.net(feats_t)
         q_taken = q_vals.gather(1, idxs_t.unsqueeze(1)).squeeze(1)
@@ -122,7 +134,7 @@ class DQNPolicy(Policy):
         with torch.no_grad():
             # Use target network for stable Q-value targets (key DQN improvement)
             q_next = self.target_net(next_feats_t).max(1).values
-            targets = rewards_norm + self.gamma * q_next * (1 - dones_t)
+            targets = rewards_transformed + self.gamma * q_next * (1 - dones_t)
 
         loss = F.mse_loss(q_taken, targets)
         self.optim.zero_grad()

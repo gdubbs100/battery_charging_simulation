@@ -13,6 +13,15 @@ from battery_sim.simulation.env import SimulationEnv
 from battery_sim.agents.policies._utils import default_features, action_norm_to_mw, make_mlp
 
 
+def _log_transform_reward(reward: float) -> float:
+    """Transform reward using signed log: sign(r) * log(1 + |r|).
+
+    Handles both positive and negative rewards while compressing large ranges.
+    """
+    sign = np.sign(reward) if reward != 0 else 1.0
+    return float(sign * np.log(1.0 + np.abs(reward)))
+
+
 class REINFORCEPolicy(Policy):
     def __init__(
         self,
@@ -86,10 +95,14 @@ class REINFORCEPolicy(Policy):
         if not self._log_probs:
             return
 
-        # Compute discounted returns for this episode
+        # Log-transform rewards for numerical stability before computing returns
+        # (battery rewards range [-5000, +1200], which creates huge gradient magnitudes)
+        transformed_rewards = [_log_transform_reward(r) for r in self._rewards]
+
+        # Compute discounted returns for this episode (on transformed rewards)
         returns = []
         running = 0.0
-        for r in reversed(self._rewards):
+        for r in reversed(transformed_rewards):
             running = r + self.gamma * running
             returns.insert(0, running)
 
@@ -97,7 +110,7 @@ class REINFORCEPolicy(Policy):
         self._batch_log_probs.extend(self._log_probs)
         self._batch_entropies.extend(self._entropies)
         self._batch_returns.extend(returns)
-        self.return_history.append(sum(self._rewards))
+        self.return_history.append(sum(self._rewards))  # Track original rewards for logging
 
     def _update_policy(self) -> None:
         """REINFORCE gradient step: normalize batch returns and update policy."""
