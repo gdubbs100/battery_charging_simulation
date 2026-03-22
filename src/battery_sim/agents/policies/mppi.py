@@ -12,7 +12,7 @@ from battery_sim.optimization.policy_optimizer import evaluate_policy
 from battery_sim.utils.types import Observation
 
 _DEFAULT_MPPI_GRID: dict = {
-    "noise_sigma": [0.2, 0.5, 1.0],
+    "noise_sigma": [0.05, 0.1, 0.2],  # Relative to max_charge_rate_mw
     "temperature": [0.5, 1.0, 5.0],
 }
 
@@ -33,7 +33,7 @@ class MPPIPolicy(Policy):
         n_samples: int = 100,
         n_trajectories: int = 50,
         temperature: float = 1.0,
-        noise_sigma: float = 0.5,
+        noise_sigma: float = 0.1,
     ):
         self.model = model
         self.battery = battery
@@ -82,7 +82,8 @@ class MPPIPolicy(Policy):
         self.model.step(observation.price)
         price_trajs = self.model.simulate(self.horizon, self.n_trajectories)
 
-        noise = np.random.randn(self.n_samples, self.horizon) * self.noise_sigma
+        # Scale noise relative to battery capacity
+        noise = np.random.randn(self.n_samples, self.horizon) * self.noise_sigma * b.max_charge_rate_mw
         action_seqs = self._warm_start + noise
         action_seqs = np.clip(action_seqs, -b.max_discharge_rate_mw, b.max_charge_rate_mw)
 
