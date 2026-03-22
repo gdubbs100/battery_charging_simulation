@@ -33,6 +33,11 @@ class REINFORCEPolicy(Policy):
         self._entropies = []
         self._rewards = []
 
+        # Batch trajectory data
+        self._batch_log_probs = []
+        self._batch_entropies = []
+        self._batch_returns = []
+
         self.loss_history = []
         self.return_history = []
 
@@ -76,23 +81,35 @@ class REINFORCEPolicy(Policy):
         action = 2 * x - 1
         return float(action)
 
-    def _update_policy(self) -> None:
-        """REINFORCE gradient step: compute returns, normalise, apply policy gradient."""
+    def _accumulate_episode(self) -> None:
+        """Accumulate episode data into batch buffers."""
         if not self._log_probs:
             return
 
-        # Compute discounted returns (Monte Carlo)
+        # Compute discounted returns for this episode
         returns = []
         running = 0.0
         for r in reversed(self._rewards):
             running = r + self.gamma * running
             returns.insert(0, running)
 
-        returns_t = torch.tensor(returns, dtype=torch.float32)
+        # Store episode data for batch processing
+        self._batch_log_probs.extend(self._log_probs)
+        self._batch_entropies.extend(self._entropies)
+        self._batch_returns.extend(returns)
+        self.return_history.append(sum(self._rewards))
+
+    def _update_policy(self) -> None:
+        """REINFORCE gradient step: normalize batch returns and update policy."""
+        if not self._batch_log_probs:
+            return
+
+        # Normalize returns across entire batch for stable gradient estimates
+        returns_t = torch.tensor(self._batch_returns, dtype=torch.float32)
         returns_norm = (returns_t - returns_t.mean()) / (returns_t.std() + 1e-8)
 
-        log_probs_t = torch.stack(self._log_probs)
-        entropies_t = torch.stack(self._entropies)
+        log_probs_t = torch.stack(self._batch_log_probs)
+        entropies_t = torch.stack(self._batch_entropies)
 
         policy_loss = -(log_probs_t * returns_norm).sum()
         entropy_bonus = self.entropy_coef * entropies_t.sum()
@@ -104,7 +121,11 @@ class REINFORCEPolicy(Policy):
         self.optim.step()
 
         self.loss_history.append(loss.item())
-        self.return_history.append(sum(self._rewards))
+
+        # Clear batch buffers
+        self._batch_log_probs = []
+        self._batch_entropies = []
+        self._batch_returns = []
 
     def learn(
         self,
@@ -113,6 +134,7 @@ class REINFORCEPolicy(Policy):
         num_iters: int = 20,
         window_len: int = 24,
         n_windows: int = 20,
+        batch_size: int = 5,
         **_
     ) -> None:
         self.max_charge_rate_mw = battery.max_charge_rate_mw
@@ -124,7 +146,7 @@ class REINFORCEPolicy(Policy):
 
         for iter_idx in range(num_iters):
             windows = sample_windows(train_data, window_len, n_windows)
-            for window in windows:
+            for batch_idx, window in enumerate(windows):
                 env = SimulationEnv(battery=battery, price_data=window)
                 obs = env.reset()
                 self.reset()
@@ -136,6 +158,15 @@ class REINFORCEPolicy(Policy):
                     self._rewards.append(reward)
                     obs = next_obs
 
+                # Accumulate episode into batch
+                self._accumulate_episode()
+
+                # Update after batch_size episodes
+                if (batch_idx + 1) % batch_size == 0:
+                    self._update_policy()
+
+            # Update any remaining episodes at end of iteration
+            if len(self._batch_log_probs) > 0:
                 self._update_policy()
 
             if (iter_idx + 1) % 5 == 0:
@@ -145,6 +176,7 @@ class REINFORCEPolicy(Policy):
         self.training = False
 
     def reset(self) -> None:
+        """Reset per-episode buffers (not batch buffers)."""
         self._log_probs = []
         self._entropies = []
         self._rewards = []
