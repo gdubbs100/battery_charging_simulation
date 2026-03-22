@@ -15,8 +15,9 @@ def log_transform_reward(reward: float) -> float:
 
 
 def default_features(obs: Observation) -> torch.Tensor:
-    """Extract [price/100, soc] features from observation."""
-    return torch.tensor([obs.price / 100.0, obs.soc], dtype=torch.float32)
+    """Extract [signed_log(price), soc] features from observation."""
+    log_price = float(np.sign(obs.price) * np.log1p(np.abs(obs.price)))
+    return torch.tensor([log_price, obs.soc], dtype=torch.float32)
 
 
 def action_norm_to_mw(x: float, max_charge: float, max_discharge: float) -> float:
