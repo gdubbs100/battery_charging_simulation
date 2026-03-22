@@ -2,7 +2,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 from scipy.optimize import linprog
+
 from battery_sim.utils.types import Observation
+
+
+def log_transform_reward(reward: float) -> float:
+    """Transform reward using signed log: sign(r) * log(1 + |r|).
+
+    Compresses large reward magnitudes while preserving sign.
+    """
+    return float(np.sign(reward) * np.log1p(np.abs(reward)))
 
 
 def default_features(obs: Observation) -> torch.Tensor:

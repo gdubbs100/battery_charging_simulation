@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Callable
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -7,19 +8,10 @@ import torch.nn.functional as F
 from torch.distributions import Beta
 
 from battery_sim.agents.policies.base import Policy
-from battery_sim.utils.types import Observation
+from battery_sim.agents.policies._utils import default_features, log_transform_reward
 from battery_sim.optimization.policy_optimizer import sample_windows
 from battery_sim.simulation.env import SimulationEnv
-from battery_sim.agents.policies._utils import default_features, action_norm_to_mw, make_mlp
-
-
-def _log_transform_reward(reward: float) -> float:
-    """Transform reward using signed log: sign(r) * log(1 + |r|).
-
-    Handles both positive and negative rewards while compressing large ranges.
-    """
-    sign = np.sign(reward) if reward != 0 else 1.0
-    return float(sign * np.log(1.0 + np.abs(reward)))
+from battery_sim.utils.types import Observation
 
 
 class REINFORCEPolicy(Policy):
@@ -49,14 +41,6 @@ class REINFORCEPolicy(Policy):
 
         self.loss_history = []
         self.return_history = []
-
-    def _get_alpha_beta(self, obs: Observation) -> tuple[torch.Tensor, torch.Tensor]:
-        """Get Beta distribution parameters from network."""
-        with torch.no_grad() if not self.training else torch.enable_grad():
-            raw = self.net(self.feature_fn(obs))
-        alpha = F.softplus(raw[0]) + 1e-4
-        beta = F.softplus(raw[1]) + 1e-4
-        return alpha, beta
 
     def select_action(self, observation: Observation) -> float:
         """Return normalized action in [-1, 1].
@@ -97,7 +81,7 @@ class REINFORCEPolicy(Policy):
 
         # Log-transform rewards for numerical stability before computing returns
         # (battery rewards range [-5000, +1200], which creates huge gradient magnitudes)
-        transformed_rewards = [_log_transform_reward(r) for r in self._rewards]
+        transformed_rewards = [log_transform_reward(r) for r in self._rewards]
 
         # Compute discounted returns for this episode (on transformed rewards)
         returns = []

@@ -1,26 +1,19 @@
 from __future__ import annotations
-from typing import Callable
-from collections import deque
+import copy
 import random
+from collections import deque
+from typing import Callable
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from battery_sim.agents.policies.base import Policy
-from battery_sim.utils.types import Observation
+from battery_sim.agents.policies._utils import default_features, log_transform_reward, make_mlp
 from battery_sim.optimization.policy_optimizer import sample_windows
 from battery_sim.simulation.env import SimulationEnv
-from battery_sim.agents.policies._utils import default_features, make_mlp
-
-
-def _log_transform_reward(reward: float) -> float:
-    """Transform reward using signed log: sign(r) * log(1 + |r|).
-
-    Handles both positive and negative rewards while compressing large ranges.
-    """
-    sign = np.sign(reward) if reward != 0 else 1.0
-    return float(sign * np.log(1.0 + np.abs(reward)))
+from battery_sim.utils.types import Observation
 
 
 class DQNPolicy(Policy):
@@ -49,7 +42,6 @@ class DQNPolicy(Policy):
         self.target_update_freq = target_update_freq
 
         # Target network for stable Q-value targets (deep copy of network)
-        import copy
         self.target_net = copy.deepcopy(net)
         self.target_net.eval()  # Target net doesn't need gradients
 
@@ -124,7 +116,7 @@ class DQNPolicy(Policy):
         # (battery rewards range [-5000, +1200], causing huge Q-values and gradients)
         # Transform: sign(r) * log(1 + |r|) compresses range to ~[-8.5, +7]
         rewards_transformed = torch.tensor(
-            [_log_transform_reward(r) for r in rewards],
+            [log_transform_reward(r) for r in rewards],
             dtype=torch.float32
         )  # Scale to reasonable magnitude
 
@@ -160,6 +152,7 @@ class DQNPolicy(Policy):
         self._epsilon = self.epsilon_start
         self._step_count = 0
         self._buffer.clear()
+        self._update_target_network()
         self.loss_history = []
         self.epsilon_history = []
 
