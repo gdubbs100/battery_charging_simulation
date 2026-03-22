@@ -19,19 +19,19 @@ class ThresholdPolicy(Policy):
         self,
         buy_threshold: float,
         sell_threshold: float,
-        charge_rate: float,
-        discharge_rate: float,
     ):
         self.buy_threshold = buy_threshold
         self.sell_threshold = sell_threshold
-        self.charge_rate = charge_rate
-        self.discharge_rate = discharge_rate
 
     def select_action(self, observation: Observation) -> float:
+        """Return normalized action in [-1, 1].
+
+        -1 = max discharge, 0 = hold, 1 = max charge
+        """
         if observation.price < self.buy_threshold:
-            return self.charge_rate
+            return 1.0
         elif observation.price > self.sell_threshold:
-            return -self.discharge_rate
+            return -1.0
         return 0.0
 
     def learn(
@@ -65,18 +65,18 @@ class TimeOfUsePolicy(Policy):
         self,
         charge_hours: set[int],
         discharge_hours: set[int],
-        charge_rate: float,
-        discharge_rate: float,
     ):
         self.charge_hours = charge_hours
         self.discharge_hours = discharge_hours
-        self.charge_rate = charge_rate
-        self.discharge_rate = discharge_rate
 
     def select_action(self, observation: Observation) -> float:
+        """Return normalized action in [-1, 1].
+
+        -1 = max discharge, 0 = hold, 1 = max charge
+        """
         hour = observation.timestamp.hour
         if hour in self.charge_hours:
-            return self.charge_rate
+            return 1.0
         elif hour in self.discharge_hours:
-            return -self.discharge_rate
+            return -1.0
         return 0.0

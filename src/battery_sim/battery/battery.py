@@ -45,12 +45,16 @@ class Battery:
         else:
             # Discharge: clip to rate limit
             power_mw = max(power_mw, -self.max_discharge_rate_mw)
-            raw_energy = abs(power_mw) * duration_hours
+            requested_output = abs(power_mw) * duration_hours
+            # Due to efficiency, battery must discharge more than the requested output
+            required_discharge = requested_output / self.efficiency
             # Clip to available energy
             available = self.energy_mwh - (self.min_soc * self.capacity_mwh)
-            actual_discharged = min(raw_energy, max(available, 0.0))
-            self.energy_mwh -= actual_discharged
-            return -actual_discharged
+            actual_discharge_from_battery = min(required_discharge, max(available, 0.0))
+            # User gets efficiency * actual_discharge_from_battery
+            actual_output = actual_discharge_from_battery * self.efficiency
+            self.energy_mwh -= actual_discharge_from_battery
+            return -actual_output
 
     def get_state(self) -> BatteryState:
         return BatteryState(

@@ -65,7 +65,8 @@ class MPPIPolicy(Policy):
 
         for t in range(H):
             a = action_seqs[:, t][:, np.newaxis]                # (K, 1)
-            delta = np.where(a >= 0, a * b.efficiency, a)       # (K, 1)
+            # Energy delta: charge stores a*efficiency, discharge draws a/efficiency
+            delta = np.where(a >= 0, a * b.efficiency, a / b.efficiency)  # (K, 1)
             delta = np.clip(delta, min_e - energy, max_e - energy)  # (K, N)
             total += price_trajs[np.newaxis, :, t] * (-delta)   # (K, N)
             energy += delta
@@ -73,6 +74,10 @@ class MPPIPolicy(Policy):
         return np.median(total, axis=1)  # (K,)
 
     def select_action(self, observation: Observation) -> float:
+        """Return normalized action in [-1, 1].
+
+        -1 = max discharge, 0 = hold, 1 = max charge
+        """
         b = self.battery
         self.model.step(observation.price)
         price_trajs = self.model.simulate(self.horizon, self.n_trajectories)
@@ -89,7 +94,10 @@ class MPPIPolicy(Policy):
         self._warm_start[:-1] = optimal[1:]
         self._warm_start[-1] = 0.0
 
-        return float(np.clip(optimal[0], -b.max_discharge_rate_mw, b.max_charge_rate_mw))
+        # Normalize to [-1, 1]
+        action_mw = np.clip(optimal[0], -b.max_discharge_rate_mw, b.max_charge_rate_mw)
+        action_normalized = action_mw / b.max_charge_rate_mw
+        return float(action_normalized)
 
     def learn(self, train_data: pd.DataFrame, battery, num_iters=10,
               window_len=24, param_grid: dict | None = None, **_):

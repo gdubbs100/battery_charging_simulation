@@ -29,18 +29,18 @@ class ProbabilisticThresholdPolicy(Policy):
         model: MedianReversionModel,
         buy_threshold: float = 50.0,
         sell_threshold: float = 200.0,
-        charge_rate: float = 1.0,
-        discharge_rate: float = 1.0,
         forecast_horizon: int = 1,
     ):
         self.model = model
         self.buy_threshold = buy_threshold
         self.sell_threshold = sell_threshold
-        self.charge_rate = charge_rate
-        self.discharge_rate = discharge_rate
         self.forecast_horizon = forecast_horizon
 
     def select_action(self, observation: Observation) -> float:
+        """Return normalized action in [-1, 1].
+
+        -1 = max discharge, 0 = hold, 1 = max charge
+        """
         result = self.model.step(observation.price, self.forecast_horizon)
         dist = result.distributions[0]
 
@@ -48,9 +48,9 @@ class ProbabilisticThresholdPolicy(Policy):
         p_above_sell = 1 - dist.cdf(self.sell_threshold)
 
         if p_below_buy > p_above_sell:
-            return self.charge_rate
+            return 1.0
         elif p_above_sell > p_below_buy:
-            return -self.discharge_rate
+            return -1.0
         return 0.0
 
     def learn(

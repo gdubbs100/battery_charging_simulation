@@ -18,8 +18,8 @@ _DEFAULT_CONT_GRID: dict = {
 class ContinuousProbabilisticPolicy(Policy):
     """Continuous-action variant of ProbabilisticThresholdPolicy.
 
-    action = signal * rate, where
-    signal = P(p_{t+1} <= buy_threshold) - P(p_{t+1} >= sell_threshold)
+    Returns normalized action in [-1, 1]:
+    action = P(p_{t+1} <= buy_threshold) - P(p_{t+1} >= sell_threshold)
     """
 
     def __init__(
@@ -27,28 +27,26 @@ class ContinuousProbabilisticPolicy(Policy):
         model: MedianReversionModel,
         buy_threshold: float = 50.0,
         sell_threshold: float = 200.0,
-        charge_rate: float = 1.0,
-        discharge_rate: float = 1.0,
         forecast_horizon: int = 1,
     ):
         self.model = model
         self.buy_threshold = buy_threshold
         self.sell_threshold = sell_threshold
-        self.charge_rate = charge_rate
-        self.discharge_rate = discharge_rate
         self.forecast_horizon = forecast_horizon
 
     def select_action(self, observation: Observation) -> float:
+        """Return normalized action in [-1, 1].
+
+        -1 = max discharge, 0 = hold, 1 = max charge
+        """
         result = self.model.step(observation.price, self.forecast_horizon)
         dist = result.distributions[0]
 
         p_buy = dist.cdf(self.buy_threshold)
         p_sell = 1 - dist.cdf(self.sell_threshold)
-        signal = p_buy - p_sell
+        action = p_buy - p_sell
 
-        if signal >= 0:
-            return signal * self.charge_rate
-        return signal * self.discharge_rate
+        return float(action)
 
     def learn(
         self,

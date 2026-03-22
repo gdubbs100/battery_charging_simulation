@@ -80,7 +80,11 @@ class SimulationEnv:
         )
 
     def step(self, action: float) -> tuple[Observation, float, bool]:
-        """Execute action. The action decided at price[t] trades at price[t+1]."""
+        """Execute action. The action decided at price[t] trades at price[t+1].
+
+        Args:
+            action: Normalized action in [-1, 1] where -1=max discharge, 1=max charge
+        """
         if self._step_idx >= self._max_steps:
             raise RuntimeError("Episode is done. Call reset().")
 
@@ -97,7 +101,9 @@ class SimulationEnv:
             )
 
         exec_price = self._prices[exec_idx]
-        energy = self.battery.apply_action(action, self.duration_hours)
+        # Denormalize action from [-1, 1] to MW
+        action_mw = action * self.battery.max_charge_rate_mw
+        energy = self.battery.apply_action(action_mw, self.duration_hours)
 
         # Reward uses the execution price (t+1)
         reward = -energy * exec_price
