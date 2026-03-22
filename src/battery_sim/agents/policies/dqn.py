@@ -24,9 +24,10 @@ class DQNPolicy(Policy):
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.05,
-        epsilon_decay: int = 500,
+        epsilon_decay: int = 2000,
         batch_size: int = 32,
         buffer_size: int = 2000,
+        target_update_freq: int = 100,
     ):
         self.net = net
         self.feature_fn = feature_fn
@@ -36,6 +37,13 @@ class DQNPolicy(Policy):
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
+        self.target_update_freq = target_update_freq
+
+        # Target network for stable Q-value targets (deep copy of network)
+        import copy
+        self.target_net = copy.deepcopy(net)
+        self.target_net.eval()  # Target net doesn't need gradients
+
         self.optim = torch.optim.Adam(self.net.parameters(), lr=lr)
 
         # Precompute action grid (normalized [-1, 1])
@@ -52,6 +60,10 @@ class DQNPolicy(Policy):
 
         self.loss_history = []
         self.epsilon_history = []
+
+    def _update_target_network(self) -> None:
+        """Update target network weights from main network."""
+        self.target_net.load_state_dict(self.net.state_dict())
 
     def select_action(self, observation: Observation) -> float:
         """Return normalized action in [-1, 1].
@@ -100,12 +112,17 @@ class DQNPolicy(Policy):
         dones_t = torch.tensor(dones, dtype=torch.float32)
         idxs_t = torch.tensor(idxs, dtype=torch.long)
 
+        # Normalize rewards for stable training
+        # (battery rewards can be ±5000 per episode, causing huge gradients)
+        rewards_norm = rewards_t / 100.0  # Scale to reasonable magnitude
+
         q_vals = self.net(feats_t)
         q_taken = q_vals.gather(1, idxs_t.unsqueeze(1)).squeeze(1)
 
         with torch.no_grad():
-            q_next = self.net(next_feats_t).max(1).values
-            targets = rewards_t + self.gamma * q_next * (1 - dones_t)
+            # Use target network for stable Q-value targets (key DQN improvement)
+            q_next = self.target_net(next_feats_t).max(1).values
+            targets = rewards_norm + self.gamma * q_next * (1 - dones_t)
 
         loss = F.mse_loss(q_taken, targets)
         self.optim.zero_grad()
@@ -114,6 +131,10 @@ class DQNPolicy(Policy):
         self.optim.step()
 
         self.loss_history.append(loss.item())
+
+        # Update target network periodically
+        if self._step_count % self.target_update_freq == 0:
+            self._update_target_network()
 
     def learn(
         self,
