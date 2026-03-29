@@ -21,7 +21,7 @@ class DQNPolicy(Policy):
         self,
         net: nn.Module,
         feature_fn: Callable[[Observation], torch.Tensor] = default_features,
-        n_actions: int = 11,
+        n_actions: int = 21,
         lr: float = 1e-3,
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
@@ -29,7 +29,7 @@ class DQNPolicy(Policy):
         epsilon_decay: int = 2000,
         batch_size: int = 32,
         buffer_size: int = 2000,
-        target_update_freq: int = 100,
+        tau: float = 0.005,
     ):
         self.net = net
         self.feature_fn = feature_fn
@@ -39,7 +39,7 @@ class DQNPolicy(Policy):
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
-        self.target_update_freq = target_update_freq
+        self.tau = tau
 
         # Target network for stable Q-value targets (deep copy of network)
         self.target_net = copy.deepcopy(net)
@@ -62,9 +62,10 @@ class DQNPolicy(Policy):
         self.loss_history = []
         self.epsilon_history = []
 
-    def _update_target_network(self) -> None:
-        """Update target network weights from main network."""
-        self.target_net.load_state_dict(self.net.state_dict())
+    def _polyak_update(self) -> None:
+        """Soft-update target network: theta_target = tau * theta + (1 - tau) * theta_target."""
+        for tp, sp in zip(self.target_net.parameters(), self.net.parameters()):
+            tp.data.mul_(1 - self.tau).add_(sp.data * self.tau)
 
     def select_action(self, observation: Observation) -> float:
         """Return normalized action in [-1, 1].
@@ -135,10 +136,7 @@ class DQNPolicy(Policy):
         self.optim.step()
 
         self.loss_history.append(loss.item())
-
-        # Update target network periodically
-        if self._step_count % self.target_update_freq == 0:
-            self._update_target_network()
+        self._polyak_update()
 
     def learn(
         self,
@@ -152,7 +150,7 @@ class DQNPolicy(Policy):
         self._epsilon = self.epsilon_start
         self._step_count = 0
         self._buffer.clear()
-        self._update_target_network()
+        self.target_net.load_state_dict(self.net.state_dict())
         self.loss_history = []
         self.epsilon_history = []
 

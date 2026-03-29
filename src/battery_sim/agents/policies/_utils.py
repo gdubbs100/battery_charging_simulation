@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from scipy.optimize import linprog
@@ -6,18 +7,45 @@ from scipy.optimize import linprog
 from battery_sim.utils.types import Observation
 
 
-def log_transform_reward(reward: float) -> float:
-    """Transform reward using signed log: sign(r) * log(1 + |r|).
+def _signed_log(x: float) -> float:
+    return float(np.sign(x) * np.log1p(np.abs(x)))
 
-    Compresses large reward magnitudes while preserving sign.
-    """
-    return float(np.sign(reward) * np.log1p(np.abs(reward)))
+
+def log_transform_reward(reward: float) -> float:
+    """Transform reward using signed log: sign(r) * log(1 + |r|)."""
+    return _signed_log(reward)
 
 
 def default_features(obs: Observation) -> torch.Tensor:
     """Extract [signed_log(price), soc] features from observation."""
-    log_price = float(np.sign(obs.price) * np.log1p(np.abs(obs.price)))
-    return torch.tensor([log_price, obs.soc], dtype=torch.float32)
+    return torch.tensor([_signed_log(obs.price), obs.soc], dtype=torch.float32)
+
+
+class PriceRelativeFeatures:
+    """Stateful feature extractor: [log_price, soc, rolling_median - price].
+
+    Pre-computes 30-day rolling median from a price DataFrame and looks up
+    the median by timestamp at each step.
+    """
+
+    def __init__(self, price_data: pd.DataFrame, window_days: int = 30):
+        self.update_data(price_data, window_days)
+
+    def update_data(self, price_data: pd.DataFrame, window_days: int = 30) -> None:
+        ts = pd.to_datetime(price_data.iloc[:, 0])
+        prices = price_data.iloc[:, 1].astype(float)
+        hours = window_days * 24
+        rolling_med = prices.rolling(hours, min_periods=1).median()
+        self._lookup = dict(zip(ts, rolling_med))
+        self._fallback = float(prices.median())
+
+    def __call__(self, obs: Observation) -> torch.Tensor:
+        median = self._lookup.get(obs.timestamp, self._fallback)
+        return torch.tensor([
+            _signed_log(obs.price),
+            obs.soc,
+            median - obs.price,
+        ], dtype=torch.float32)
 
 
 def action_norm_to_mw(x: float, max_charge: float, max_discharge: float) -> float:

@@ -87,57 +87,66 @@ def plot_daily_revenue(result: EvalResult, figsize: tuple = (10, 4)) -> plt.Figu
 
 def compare_policies(
     results: list[EvalResult],
-    figsize: tuple = (14, 10),
+    figsize: tuple = (14, 5),
 ) -> plt.Figure:
-    """Compare multiple policies: cumulative revenue, daily revenue distribution, actions."""
-    fig, axes = plt.subplots(2, 2, figsize=figsize)
+    """Compare multiple policies: cumulative revenue over time and total revenue bar chart."""
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
     fig.suptitle("Policy Comparison", fontsize=14, fontweight="bold")
 
+    names = [r.name for r in results]
+    colors = plt.cm.Set2(np.linspace(0, 1, len(results)))
+
     # 1. Cumulative revenue over time
-    ax = axes[0, 0]
+    ax = axes[0]
     for r in results:
         ax.plot(r.df["timestamp"], r.df["cumulative_revenue"], label=r.name, linewidth=0.8)
     ax.set_ylabel("Cumulative Revenue ($)")
     ax.set_title("Cumulative Revenue")
-    ax.legend()
+    ax.legend(fontsize=7)
     ax.grid(True, alpha=0.3)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
 
-    # 2. Daily revenue box plot
-    ax = axes[0, 1]
-    daily_data = [r.daily_revenue.values for r in results]
-    names = [r.name for r in results]
-    bp = ax.boxplot(daily_data, labels=names, patch_artist=True)
-    colors = plt.cm.Set2(np.linspace(0, 1, len(results)))
-    for patch, color in zip(bp["boxes"], colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.7)
-    ax.set_ylabel("Daily Revenue ($)")
-    ax.set_title("Daily Revenue Distribution")
-    ax.grid(True, alpha=0.3)
-
-    # 3. Summary bar chart
-    ax = axes[1, 0]
+    # 2. Summary bar chart
+    ax = axes[1]
     revenues = [r.cumulative_revenue for r in results]
-    bars = ax.bar(names, revenues, color=colors, alpha=0.7)
+    bars = ax.barh(names, revenues, color=colors, alpha=0.7)
     for bar, rev in zip(bars, revenues):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
-                f"${rev:,.0f}", ha="center", va="bottom", fontsize=9)
-    ax.set_ylabel("Total Revenue ($)")
+        ax.text(bar.get_width(), bar.get_y() + bar.get_height() / 2,
+                f" ${rev:,.0f}", ha="left", va="center", fontsize=8)
+    ax.set_xlabel("Total Revenue ($)")
     ax.set_title("Total Revenue")
-    ax.grid(True, alpha=0.3)
-
-    # 4. SoC comparison
-    ax = axes[1, 1]
-    for r in results:
-        ax.plot(r.df["timestamp"], r.df["soc"], label=r.name, linewidth=0.8, alpha=0.7)
-    ax.set_ylabel("SoC")
-    ax.set_ylim(-0.05, 1.05)
-    ax.set_title("Battery State of Charge")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+    ax.grid(True, alpha=0.3, axis="x")
 
     fig.autofmt_xdate()
+    fig.tight_layout()
+    return fig
+
+
+def plot_hourly_profile(result: EvalResult, figsize: tuple = (14, 4)) -> plt.Figure:
+    """Box plots of revenue, SoC, and action by hour of day for a single policy."""
+    df = result.df.copy()
+    df["hour"] = pd.to_datetime(df["timestamp"]).dt.hour
+    hours = list(range(24))
+
+    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    fig.suptitle(f"{result.name} — Hourly Profiles", fontsize=13, fontweight="bold")
+
+    for ax, col, label in zip(
+        axes,
+        ["reward", "soc", "action"],
+        ["Revenue ($)", "SoC", "Action"],
+    ):
+        data = [df.loc[df["hour"] == h, col].values for h in hours]
+        bp = ax.boxplot(data, positions=hours, widths=0.6, patch_artist=True,
+                        showfliers=False, medianprops={"color": "black"})
+        for patch in bp["boxes"]:
+            patch.set_facecolor("steelblue")
+            patch.set_alpha(0.6)
+        ax.axhline(0, color="gray", linewidth=0.5, linestyle="--")
+        ax.set_xlabel("Hour of Day")
+        ax.set_ylabel(label)
+        ax.set_xticks(range(0, 24, 3))
+        ax.grid(True, alpha=0.3, axis="y")
+
     fig.tight_layout()
     return fig

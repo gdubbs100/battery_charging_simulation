@@ -101,9 +101,12 @@ class REINFORCEPolicy(Policy):
         if not self._batch_log_probs:
             return
 
-        # Normalize returns across entire batch for stable gradient estimates
+        # Normalize returns using median and IQR for robustness to outliers
         returns_t = torch.tensor(self._batch_returns, dtype=torch.float32)
-        returns_norm = (returns_t - returns_t.mean()) / (returns_t.std() + 1e-8)
+        median = returns_t.median()
+        q75, q25 = returns_t.quantile(0.75), returns_t.quantile(0.25)
+        iqr = q75 - q25
+        returns_norm = (returns_t - median) / (iqr + 1e-8)
 
         log_probs_t = torch.stack(self._batch_log_probs)
         entropies_t = torch.stack(self._batch_entropies)

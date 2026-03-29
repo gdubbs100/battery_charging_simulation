@@ -108,11 +108,16 @@ class SimulationEnv:
         # Reward uses the execution price (t+1)
         reward = -energy * exec_price
 
+        # Record effective action (what actually happened, not what was requested)
+        # energy>0 means charged, energy<0 means discharged
+        max_energy = self.battery.max_charge_rate_mw * self.duration_hours
+        effective_action = energy / max_energy if max_energy > 0 else 0.0
+
         state = self.battery.get_state()
         self._trajectory.append(StepRecord(
             timestamp=self._timestamps[exec_idx],
             price=exec_price,
-            action=action,
+            action=effective_action,
             reward=reward,
             soc=state.soc,
             energy_mwh=state.energy_mwh,

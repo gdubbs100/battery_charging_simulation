@@ -30,7 +30,8 @@ class Battery:
     def apply_action(self, power_mw: float, duration_hours: float) -> float:
         """Apply charge (positive) or discharge (negative) action.
 
-        Returns actual energy transacted in MWh (positive = charged, negative = discharged).
+        Returns grid-side energy in MWh (positive = drawn from grid for charging,
+        negative = delivered to grid from discharging).
         """
         if power_mw >= 0:
             # Charge: clip to rate limit
@@ -41,7 +42,9 @@ class Battery:
             headroom = (self.max_soc * self.capacity_mwh) - self.energy_mwh
             actual_stored = min(usable_energy, max(headroom, 0.0))
             self.energy_mwh += actual_stored
-            return actual_stored
+            # Grid-side: we drew actual_stored / efficiency from the grid
+            grid_energy = actual_stored / self.efficiency if actual_stored > 0 else 0.0
+            return grid_energy
         else:
             # Discharge: clip to rate limit
             power_mw = max(power_mw, -self.max_discharge_rate_mw)
@@ -51,7 +54,7 @@ class Battery:
             # Clip to available energy
             available = self.energy_mwh - (self.min_soc * self.capacity_mwh)
             actual_discharge_from_battery = min(required_discharge, max(available, 0.0))
-            # User gets efficiency * actual_discharge_from_battery
+            # Grid-side: we deliver efficiency * actual_discharge to the grid
             actual_output = actual_discharge_from_battery * self.efficiency
             self.energy_mwh -= actual_discharge_from_battery
             return -actual_output

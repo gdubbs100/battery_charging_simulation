@@ -12,8 +12,8 @@ from battery_sim.optimization.policy_optimizer import evaluate_policy
 from battery_sim.utils.types import Observation
 
 _DEFAULT_MPPI_GRID: dict = {
-    "noise_sigma": [0.05, 0.1, 0.2],  # Relative to max_charge_rate_mw
-    "temperature": [0.5, 1.0, 5.0],
+    "noise_sigma": [0.05, 0.1, 0.2, 0.3],  # Relative to max_charge_rate_mw
+    "temperature": [0.25, 0.5, 0.75, 1.0],
 }
 
 
