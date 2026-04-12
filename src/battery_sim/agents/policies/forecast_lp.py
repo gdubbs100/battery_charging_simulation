@@ -64,4 +64,4 @@ class ForecastLPPolicy(Policy):
         self.model.fit(train_data)
 
     def reset(self) -> None:
-        pass
+        self.model.reset()

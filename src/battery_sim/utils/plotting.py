@@ -98,8 +98,8 @@ def compare_policies(
 
     # 1. Cumulative revenue over time
     ax = axes[0]
-    for r in results:
-        ax.plot(r.df["timestamp"], r.df["cumulative_revenue"], label=r.name, linewidth=0.8)
+    for r, c in zip(results, colors):
+        ax.plot(r.df["timestamp"], r.df["cumulative_revenue"], label=r.name, linewidth=0.8, color=c)
     ax.set_ylabel("Cumulative Revenue ($)")
     ax.set_title("Cumulative Revenue")
     ax.legend(fontsize=7)
@@ -115,6 +115,51 @@ def compare_policies(
                 f" ${rev:,.0f}", ha="left", va="center", fontsize=8)
     ax.set_xlabel("Total Revenue ($)")
     ax.set_title("Total Revenue")
+    ax.grid(True, alpha=0.3, axis="x")
+
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return fig
+
+
+def compare_policies_multi(
+    results_by_policy: dict[str, list[EvalResult]],
+    figsize: tuple = (14, 5),
+) -> plt.Figure:
+    """Compare policies across multiple runs: shaded bands + error bars."""
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+    n_runs = len(next(iter(results_by_policy.values())))
+    fig.suptitle(f"Policy Comparison ({n_runs} runs)", fontsize=14, fontweight="bold")
+
+    names = list(results_by_policy.keys())
+    colors = plt.cm.Set2(np.linspace(0, 1, len(names)))
+
+    # 1. Cumulative revenue: mean line + ±1σ band
+    ax = axes[0]
+    for (name, runs), c in zip(results_by_policy.items(), colors):
+        cum_revs = np.array([r.df["cumulative_revenue"].values for r in runs])
+        timestamps = runs[0].df["timestamp"]
+        mean = cum_revs.mean(axis=0)
+        std = cum_revs.std(axis=0)
+        ax.plot(timestamps, mean, label=name, color=c, linewidth=0.8)
+        ax.fill_between(timestamps, mean - std, mean + std, color=c, alpha=0.2)
+    ax.set_ylabel("Cumulative Revenue ($)")
+    ax.set_title("Cumulative Revenue (mean ± 1σ)")
+    ax.legend(fontsize=7)
+    ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+
+    # 2. Total revenue bar + error bars
+    ax = axes[1]
+    means = [np.mean([r.cumulative_revenue for r in runs]) for runs in results_by_policy.values()]
+    stds = [np.std([r.cumulative_revenue for r in runs]) for runs in results_by_policy.values()]
+    bars = ax.barh(names, means, color=colors, alpha=0.7)
+    ax.errorbar(means, names, xerr=stds, fmt="none", color="black", capsize=4, linewidth=1)
+    for bar, mean in zip(bars, means):
+        ax.text(bar.get_width(), bar.get_y() + bar.get_height() / 2,
+                f" ${mean:,.0f}", ha="left", va="center", fontsize=8)
+    ax.set_xlabel("Total Revenue ($)")
+    ax.set_title("Total Revenue (mean ± 1σ)")
     ax.grid(True, alpha=0.3, axis="x")
 
     fig.autofmt_xdate()

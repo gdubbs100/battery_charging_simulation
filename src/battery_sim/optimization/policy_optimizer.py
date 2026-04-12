@@ -21,12 +21,12 @@ def run_episode(env: SimulationEnv, policy: Policy) -> SimResult:
 
 
 def sample_windows(data: pd.DataFrame, window_len: int, n: int) -> list[pd.DataFrame]:
-    """Sample n random windows of length window_len rows from data."""
-    max_start = len(data) - window_len
-    if max_start <= 0:
+    """Sample n non-overlapping random windows of length window_len rows from data."""
+    num_slots = len(data) // window_len
+    if num_slots == 0:
         raise ValueError(f"window_len={window_len} exceeds data length {len(data)}")
-    starts = np.random.choice(max_start, size=min(n, max_start), replace=False)
-    return [data.iloc[s : s + window_len].reset_index(drop=True) for s in starts]
+    slots = np.random.choice(num_slots, size=min(n, num_slots), replace=False)
+    return [data.iloc[s * window_len : (s + 1) * window_len].reset_index(drop=True) for s in slots]
 
 
 def evaluate_policy(

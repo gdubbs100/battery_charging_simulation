@@ -12,8 +12,8 @@ from battery_sim.optimization.policy_optimizer import evaluate_policy
 from battery_sim.utils.types import Observation
 
 _DEFAULT_MPPI_GRID: dict = {
-    "noise_sigma": [0.05, 0.1, 0.2, 0.3],  # Relative to max_charge_rate_mw
-    "temperature": [0.25, 0.5, 0.75, 1.0],
+    "noise_sigma": [0.01, 0.05, 0.1, 0.2, 0.4, 0.8],
+    "temperature": [0.1, 0.25, 0.5, 1.0, 2.0, 5.0],
 }
 
 
@@ -64,12 +64,16 @@ class MPPIPolicy(Policy):
         total = np.zeros((K, N))
 
         for t in range(H):
-            a = action_seqs[:, t][:, np.newaxis]                # (K, 1)
-            # Energy delta: charge stores a*efficiency, discharge draws a/efficiency
-            delta = np.where(a >= 0, a * b.efficiency, a / b.efficiency)  # (K, 1)
-            delta = np.clip(delta, min_e - energy, max_e - energy)  # (K, N)
-            total += price_trajs[np.newaxis, :, t] * (-delta)   # (K, N)
-            energy += delta
+            a = action_seqs[:, t][:, np.newaxis]                    # (K, 1)
+            # Symmetric efficiency: eta*a actually transfers for both charge and discharge
+            battery_delta = a * b.efficiency                        # (K, 1)
+            battery_delta = np.clip(battery_delta, min_e - energy, max_e - energy)  # (K, N)
+            # Grid-side: charge draws battery_delta/eta, discharge delivers battery_delta
+            grid_delta = np.where(a >= 0,
+                                  battery_delta / b.efficiency,
+                                  battery_delta)                    # (K, N)
+            total += price_trajs[np.newaxis, :, t] * (-grid_delta)  # (K, N)
+            energy += battery_delta
 
         return np.median(total, axis=1)  # (K,)
 
@@ -102,7 +106,7 @@ class MPPIPolicy(Policy):
 
     def learn(self, train_data: pd.DataFrame, battery, num_iters=10,
               window_len=24, param_grid: dict | None = None, **_):
-        """Fit model, update battery ref, tune noise_sigma and temperature."""
+        """Fit model, update battery ref, tune noise_sigma, temperature, and horizon."""
         self.battery = battery
         self.model.fit(train_data)
 
@@ -127,3 +131,4 @@ class MPPIPolicy(Policy):
 
     def reset(self) -> None:
         self._warm_start = np.zeros(self.horizon)
+        self.model.reset()

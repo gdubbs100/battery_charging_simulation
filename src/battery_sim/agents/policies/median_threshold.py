@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from itertools import product
 
-import numpy as np
+import numpy as np  # used by ProbabilisticMedianThresholdPolicy
 import pandas as pd
 
 from battery_sim.agents.policies.base import Policy
@@ -11,42 +11,52 @@ from battery_sim.optimization.policy_optimizer import evaluate_policy
 from battery_sim.utils.types import Observation
 
 _DEFAULT_GRID: dict = {
-    "spread": [10, 25, 50, 75, 100, 150],
+    "buy_dev": [10, 25, 50, 75, 100],
+    "sell_dev": [10, 25, 50, 75, 100],
 }
 
 _DEFAULT_PROB_MED_GRID: dict = {
-    "spread": [10, 25, 50, 75, 100, 150],
-    "horizon": [3, 6, 12],
+    "buy_dev": [10, 25, 50, 75],
+    "sell_dev": [10, 25, 50, 75],
 }
 
 
 class MedianThresholdPolicy(Policy):
     """Charge/discharge based on deviation from 30-day rolling median.
 
-    action = clip((median - price) / spread, -1, 1)
+    deviation = median_{t-1} - p_{t-1}
 
-    When price < median: positive action (charge).
-    When price > median: negative action (discharge).
-    Spread controls sensitivity — smaller spread means more aggressive trading.
+    action =  1.0  if deviation >  buy_dev   (price cheap enough → charge)
+    action = -1.0  if deviation < -sell_dev  (price expensive enough → discharge)
+    action =  0.0  otherwise                 (hold)
+
+    Deterministic analog of ProbabilisticMedianThresholdPolicy — same
+    deviation thresholds applied to the current price rather than to
+    probabilities over simulated trajectories.
     """
 
     def __init__(
         self,
         model: MedianReversionModel,
-        spread: float = 50.0,
+        buy_dev: float = 25.0,
+        sell_dev: float = 25.0,
     ):
         self.model = model
-        self.spread = spread
+        self.buy_dev = buy_dev
+        self.sell_dev = sell_dev
         self._prev_price: float | None = None
 
     def select_action(self, observation: Observation) -> float:
-        # Use p_{t-1} and median_{t-1} to choose the action
         median = self.model.rolling_median
         prev = self._prev_price if self._prev_price is not None else observation.price
         self._prev_price = observation.price
         self.model.step(observation.price)
-        action = (median - prev) / self.spread
-        return float(np.clip(action, -1.0, 1.0))
+        deviation = median - prev
+        if deviation > self.buy_dev:
+            return 1.0
+        elif deviation < -self.sell_dev:
+            return -1.0
+        return 0.0
 
     def learn(
         self,
@@ -62,9 +72,11 @@ class MedianThresholdPolicy(Policy):
 
         self.model.fit(train_data)
 
-        best_score, best_spread = float("-inf"), self.spread
-        for (spread,) in product(param_grid["spread"]):
-            self.spread = spread
+        best_score = float("-inf")
+        best_params = (self.buy_dev, self.sell_dev)
+        for buy_dev, sell_dev in product(param_grid["buy_dev"], param_grid["sell_dev"]):
+            self.buy_dev = buy_dev
+            self.sell_dev = sell_dev
             score = evaluate_policy(
                 self, train_data, battery,
                 n_windows=num_iters, window_len=window_len,
@@ -72,52 +84,44 @@ class MedianThresholdPolicy(Policy):
             )
             self.model.fit(train_data)
             if score > best_score:
-                best_score, best_spread = score, spread
+                best_score, best_params = score, (buy_dev, sell_dev)
 
-        self.spread = best_spread
+        self.buy_dev, self.sell_dev = best_params
         self.model.fit(train_data)
 
     def reset(self) -> None:
         self._prev_price = None
+        self.model.reset()
 
 
 class ProbabilisticMedianThresholdPolicy(Policy):
-    """Probabilistic upgrade of MedianThresholdPolicy.
+    """Uses analytical CDF of the forecast distribution to compute action.
 
-    Deterministic analog: action = clip((median - price) / spread, -1, 1)
-    This policy:         action = clip(median(median - simulated_prices) / spread, -1, 1)
-
-    Uses multi-step Monte Carlo simulation to estimate the robust central
-    tendency of future deviations from the rolling median. The median
-    estimator handles the Cauchy model's fat tails correctly (Cauchy has
-    no finite mean, but the median is well-defined).
-
-    Over multiple simulated steps, compounding reversion dynamics create
-    path-dependent outcomes that a single-step forecast cannot capture.
+    For each step in the forecast horizon, evaluates:
+        p_buy  = P(p_future < median - buy_dev)   averaged over horizon
+        p_sell = P(p_future > median + sell_dev)  averaged over horizon
+        action = p_buy - p_sell
     """
 
     def __init__(
         self,
         model: MedianReversionModel,
+        buy_dev: float = 25.0,
+        sell_dev: float = 25.0,
         horizon: int = 6,
-        n_trajectories: int = 50,
-        spread: float = 50.0,
     ):
         self.model = model
+        self.buy_dev = buy_dev
+        self.sell_dev = sell_dev
         self.horizon = horizon
-        self.n_trajectories = n_trajectories
-        self.spread = spread
 
     def select_action(self, observation: Observation) -> float:
-        # Get median_{t-1} before updating buffer
         median = self.model.rolling_median
-        # model.current_price is p_{t-1} (buffer not yet updated with p_t)
-        trajs = self.model.simulate(self.horizon, self.n_trajectories)  # (N, H)
-        # Robust estimate of future deviation from median
-        signal = np.median(median - trajs)
-        # Now update buffer with current price for next call
+        result = self.model.forecast(self.horizon)
+        p_buy = float(np.mean([d.cdf(median - self.buy_dev) for d in result.distributions]))
+        p_sell = float(np.mean([1 - d.cdf(median + self.sell_dev) for d in result.distributions]))
         self.model.step(observation.price)
-        return float(np.clip(signal / self.spread, -1, 1))
+        return p_buy - p_sell
 
     def learn(
         self,
@@ -133,10 +137,11 @@ class ProbabilisticMedianThresholdPolicy(Policy):
 
         self.model.fit(train_data)
 
-        best_score, best_params = float("-inf"), (self.spread, self.horizon)
-        for spread, horizon in product(param_grid["spread"], param_grid["horizon"]):
-            self.spread = spread
-            self.horizon = horizon
+        best_score = float("-inf")
+        best_params = (self.buy_dev, self.sell_dev)
+        for buy_dev, sell_dev in product(param_grid["buy_dev"], param_grid["sell_dev"]):
+            self.buy_dev = buy_dev
+            self.sell_dev = sell_dev
             score = evaluate_policy(
                 self, train_data, battery,
                 n_windows=num_iters, window_len=window_len,
@@ -144,10 +149,10 @@ class ProbabilisticMedianThresholdPolicy(Policy):
             )
             self.model.fit(train_data)
             if score > best_score:
-                best_score, best_params = score, (spread, horizon)
+                best_score, best_params = score, (buy_dev, sell_dev)
 
-        self.spread, self.horizon = best_params
+        self.buy_dev, self.sell_dev = best_params
         self.model.fit(train_data)
 
     def reset(self) -> None:
-        pass
+        self.model.reset()

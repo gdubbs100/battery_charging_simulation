@@ -32,6 +32,7 @@ class MedianReversionModel(StochasticModel):
         self.kappa: float | None = None
         self.loc: float | None = None
         self.scale: float | None = None
+        self._initial_buffer: list[float] = []
 
     def _check_fitted(self):
         if self.kappa is None:
@@ -55,6 +56,13 @@ class MedianReversionModel(StochasticModel):
 
         for p in prices.values[-self.window_size:]:
             self._buffer.append(float(p))
+        # Snapshot so reset() can restore post-fit state without refitting.
+        self._initial_buffer = list(self._buffer)
+
+    def reset(self) -> None:
+        """Restore buffer to its state immediately after the last fit()."""
+        self._buffer.clear()
+        self._buffer.extend(self._initial_buffer)
 
     # ── Properties ──────────────────────────────────────────────────
 

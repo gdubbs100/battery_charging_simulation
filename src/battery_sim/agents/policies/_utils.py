@@ -94,11 +94,11 @@ def solve_lp(
         e_0 = b.initial_soc * b.capacity_mwh
 
     # Decision variables: [c_0, ..., c_{T-1}, d_0, ..., d_{T-1}]
-    # Charge cost: c[t] * efficiency * price[t+1] * dt (energy stored after losses)
-    c_obj = b.efficiency * exec_prices * dt
-    # Discharge revenue: d[t] * price[t+1] * dt, but cost to battery is d[t] / efficiency * dt
-    # So effective cost: -d[t] / efficiency * price[t+1] * dt (negative = revenue)
-    d_obj = -exec_prices / b.efficiency * dt
+    # c[t]: grid-side charge power (MW drawn from grid); stores eff*c[t]*dt MWh
+    # d[t]: battery-side discharge power (MW drawn from battery); delivers eff*d[t]*dt MWh to grid
+    # Objective: maximise sum (eff*d[t] - c[t]) * price[t+1] * dt
+    c_obj = exec_prices * dt
+    d_obj = -b.efficiency * exec_prices * dt
     c_obj_full = np.concatenate([c_obj, d_obj])
 
     # Bounds
@@ -111,15 +111,15 @@ def solve_lp(
     b_ub = np.zeros(2 * T)
 
     for t in range(1, T + 1):
-        # Energy balance: e[t] = e_0 + sum_{s<=t} (c[s]*eff - d[s]/eff) * dt
-        # Lower bound: e[t] >= min_e => -sum c*eff*dt + sum d/eff*dt <= e_0 - min_e
+        # Energy balance: e[t] = e_0 + eff * sum_{s<=t} (c[s] - d[s]) * dt
+        # Lower bound: e[t] >= min_e => -eff*sum(c-d)*dt <= e_0 - min_e
         A_ub[2 * (t - 1), :t] = -b.efficiency * dt
-        A_ub[2 * (t - 1), T:T + t] = dt / b.efficiency
+        A_ub[2 * (t - 1), T:T + t] = b.efficiency * dt
         b_ub[2 * (t - 1)] = e_0 - min_e
 
-        # Upper bound: e[t] <= max_e => sum c*eff*dt - sum d/eff*dt <= max_e - e_0
+        # Upper bound: e[t] <= max_e => eff*sum(c-d)*dt <= max_e - e_0
         A_ub[2 * (t - 1) + 1, :t] = b.efficiency * dt
-        A_ub[2 * (t - 1) + 1, T:T + t] = -dt / b.efficiency
+        A_ub[2 * (t - 1) + 1, T:T + t] = -b.efficiency * dt
         b_ub[2 * (t - 1) + 1] = max_e - e_0
 
     result = linprog(c_obj_full, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs")
